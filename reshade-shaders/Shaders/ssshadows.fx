@@ -10,6 +10,25 @@
     #define LightColorAlphaBoost 2.
 #endif
 
+#ifndef SKIP_SAMPLE_COUNT
+    #define SKIP_SAMPLE_COUNT 10
+#endif
+
+#ifndef SAMPLE_DOWN_BY
+    #define SAMPLE_DOWN_BY 4
+#endif
+
+#ifndef PIXEL_FILTER
+    #define PIXEL_FILTER
+#endif
+
+uniform float Amount <
+    ui_type = "drag";
+    ui_step = 0.1;
+    ui_min = 0.;
+    ui_max = 10.;
+> = 0.5;
+
 uniform float Threshold <
     ui_type = "drag";
     ui_step = 0.01;
@@ -22,6 +41,13 @@ uniform float Intensity <
     ui_min = 0.;
     ui_max = 10.;
 > = 1.;
+
+uniform float MaxIntensity <
+    ui_type = "drag";
+    ui_min = 0.;
+    ui_max = 1.;
+> = 1.;
+
 
 uniform float Offset <
     ui_type = "drag";
@@ -76,6 +102,9 @@ uniform int Method <
     ui_max = 2;
 > = 0;
 
+texture brightest { Width = 1; Height = 1; Format = R16F; };
+sampler brightestSampler { Texture = brightest; };
+
 texture downsampledblur1 { Width = BUFFER_WIDTH / DownSamplerSampleDownRate; Height = BUFFER_HEIGHT / DownSamplerSampleDownRate; Format = RGBA8; };
 sampler dsb1sampler {Texture = downsampledblur1;};
 
@@ -102,6 +131,9 @@ sampler brightSampler { Texture = brightCorrection; };
 
 texture maxBrightness {Width = 1; Height = 1; Format = R16F;};
 sampler maxSampler { Texture = maxBrightness; };
+
+texture brightPixelArray { Width = BUFFER_WIDTH / SAMPLE_DOWN_BY; Height = BUFFER_HEIGHT / SAMPLE_DOWN_BY; Format = RGBA8; };
+sampler brightPixels { Texture = brightPixelArray; };
 
 float2 mix(float2 a, float2 b, float c)
 {
@@ -164,13 +196,19 @@ void dsb2(in float4 position : SV_Position, in float2 texCoord : TexCoord, out f
 void getLights(in float4 position : SV_Position, in float2 texCoord : TexCoord, out float4 color : SV_Target)
 {
     color = float4(0, 0, 0, 0);
-    if(length(tex2D(dsb2sampler, texCoord).rgb) > Threshold)
+    /*if(length(tex2D(dsb2sampler, texCoord).rgb) > Threshold)
     {
         color = tex2D(dsb2sampler, texCoord).rgb;
         color.rgb = (color.rgb*Saturation) + ((color.r+color.g+color.b)/3)*(1-Saturation);
         color.a = LightColorAlphaBoost;
     }
-    color += (tex2D(oldDownSampler, texCoord) - color)*Influence;
+    color += (tex2D(oldDownSampler, texCoord) - color)*Influence;*/
+    if(tex2D(brightPixels, texCoord).a > 0)
+    {
+        color = tex2D(brightPixels, texCoord).rgb;
+        color.rgb = (color.rgb*Saturation) + ((color.r+color.g+color.b)/3)*(1-Saturation);
+        color.a = LightColorAlphaBoost;
+    }
 }
 
 void getOldLights(in float4 position : SV_Position, in float2 texCoord : TexCoord, out float4 color : SV_Target)
@@ -296,19 +334,73 @@ void correctLight(in float4 position : SV_Position, in float2 texCoord : TexCoor
 
 void comb(in float4 position : SV_Position, in float2 texCoord : TexCoord, out float4 color : SV_Target)
 {
-    color = tex2D(ReShade::BackBuffer, texCoord) - float4((tex2D(brightSampler, texCoord).rgb * Intensity), 0);
+    color = tex2D(ReShade::BackBuffer, texCoord) - float4((min(tex2D(brightSampler, texCoord).rgb * Intensity, float3(MaxIntensity,MaxIntensity, MaxIntensity))), 0);
+}
+
+void calculateBrightness(in float4 position : SV_Position, in float2 texCoord : TexCoord, out float color : SV_Target)
+{
+    color = 0.;
+    for (int x = 0; x < BUFFER_WIDTH; x+=SKIP_SAMPLE_COUNT)
+    {
+        for (int y = 0; y < BUFFER_WIDTH; y+=SKIP_SAMPLE_COUNT)
+        {
+            float3 a = tex2D(ReShade::BackBuffer, BUFFER_PIXEL_SIZE * float2(x, y)).rgb;
+            color += (a.r + a.g + a.b)/3.;
+        }
+    }
+    color /= BUFFER_HEIGHT*BUFFER_WIDTH/(SKIP_SAMPLE_COUNT*SKIP_SAMPLE_COUNT)/(Amount);
+}
+
+void brightestPixels(in float4 position : SV_Position, in float2 texCoord : TexCoord, out float4 color : SV_Target)
+{
+    float maxx = tex2D(brightestSampler, float2(0.5, 0.5)).r;
+    float3 a = tex2D(ReShade::BackBuffer, texCoord).rgb;
+    if((a.r+a.g+a.b)/3 > maxx)
+    {
+        bool above = true;
+        for (int x = -1; x <= 1; x++)
+        {
+            float3 b = tex2D(ReShade::BackBuffer, texCoord + (BUFFER_PIXEL_SIZE*SAMPLE_DOWN_BY)*float2(x, 0) ).rgb;
+            if((b.r+b.g+b.b)/3 < maxx)
+            {
+                above = false;
+            }
+        }
+        if (above)
+            {color = float4(a, 1);}
+        else
+            {color = float4(0, 0, 0, 0);}
+    }
+    else
+    {
+        color = float4(0, 0, 0, 0);
+    }
 }
 
 technique ScreenSpaceShadows
 {
-    pass Blur1
+    pass totalBrightness
+    {
+        VertexShader = PostProcessVS;
+        PixelShader = calculateBrightness;
+        RenderTarget = brightest;
+    }
+
+    pass addBright
+    {
+        VertexShader = PostProcessVS;
+        PixelShader = brightestPixels;
+        RenderTarget = brightPixelArray;
+    }
+
+    /*pass Blur1
     {
         VertexShader = PostProcessVS;
         PixelShader = dsb1;
         RenderTarget = downsampledblur1;
     }
 
-    pass Blur1
+    pass Blur2
     {
         VertexShader = PostProcessVS;
         PixelShader = dsb2;
@@ -320,7 +412,7 @@ technique ScreenSpaceShadows
         VertexShader = PostProcessVS;
         PixelShader = getOldLights;
         RenderTarget = oldDownSampled;
-    }
+    }*/
 
     pass DownSamplerSampleDownRatedBackBufferPass
     {
@@ -329,7 +421,7 @@ technique ScreenSpaceShadows
         RenderTarget = DownSamplerSampleDownRated;
     }
 
-    pass lightBlur
+    /*pass lightBlur
     {
         VertexShader = PostProcessVS;
         PixelShader = lb1;
@@ -341,7 +433,7 @@ technique ScreenSpaceShadows
         VertexShader = PostProcessVS;
         PixelShader = lb2;
         RenderTarget = lightBlur2;
-    }
+    }*/
 
     pass lightPass
     {
