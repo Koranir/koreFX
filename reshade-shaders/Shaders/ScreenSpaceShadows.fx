@@ -92,8 +92,17 @@ uniform float intensity
     ui_type = "slider";
     ui_tooltip = "Shadow darkness.";
     ui_min = 0.;
-    ui_max = 5.;
+    ui_max = 25.;
 > = 2.5;
+
+uniform float type
+<
+    ui_label = "Shadow Type";
+    ui_type = "slider";
+    ui_tooltip = "Zero for multiplicative, One for subtractive.";
+    ui_min = 0.;
+    ui_max = 1.;
+> = 0.1;
 
 uniform float minimum_brightness
 <
@@ -653,8 +662,8 @@ float4 apply_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) 
     float mod_intensity = intensity * (tex2D(light_centre_sampler, 0).z);
     float final_shadow = Tonemap_ACES(pow(shadow * mod_intensity, 1. / shadow_ramp) * (1 + luma * shadow_luma_mod));
     //final_shadow = min(final_shadow, 1. - minimum_brightness);
-    color *= 1. - final_shadow;// / 2;
-    //color -= final_shadow / 2;
+    color *= 1. - final_shadow * (1. - type);
+    color -= final_shadow * type;
     return float4(color, 1);
 };
 
