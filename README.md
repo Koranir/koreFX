@@ -1,2 +1,4 @@
 # koreFX
- Reshade Shader Utils
+ReShade shaders.
+Currently have:
+   Screen Space Shadows
