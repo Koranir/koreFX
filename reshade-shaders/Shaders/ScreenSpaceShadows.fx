@@ -629,7 +629,7 @@ float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOOR
                 ((depth_difference - assumed_thickness / 10000) < depth_offset / 1000)
             ) {
                 shadowed += 1. / (shadow_quality * GPU_SOURCE_CALC_STEPS);
-                // shadowed += max(dotp, 0.);
+                // shadowed += max(dotp, 0.) / 2.;
             }
         }
     }
@@ -662,7 +662,7 @@ float4 apply_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) 
     float mod_intensity = intensity * (tex2D(light_centre_sampler, 0).z);
     float final_shadow = Tonemap_ACES(pow(shadow * mod_intensity, 1. / shadow_ramp) * (1 + luma * shadow_luma_mod));
     //final_shadow = min(final_shadow, 1. - minimum_brightness);
-    color *= 1. - final_shadow * (1. - type);
+    color *= 1. - sqrt(final_shadow) * (1. - type);
     color -= final_shadow * type;
     return float4(color, 1);
 };
