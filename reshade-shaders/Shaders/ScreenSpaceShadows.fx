@@ -681,7 +681,7 @@ technique SSS
                     "And most importantly the GPU_SOURCE_CALC,\n"
                     "LIGHT_SOURCE_SEARCH_STEPS_X and Y preprocessors.\n"
                     "Quality can be increased further with the\n"
-                    "SHADOW_MIPMAP_LEVEL preprocessor."
+                    "SHADOW_MIPMAP_LEVEL preprocessor.";
 >
 {
     pass Diff {
