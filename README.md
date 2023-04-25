@@ -1,4 +1,6 @@
-# koreFX
-ReShade shaders.
-Currently have:
-   Screen Space Shadows
+# KoreFX
+Shaders for ReShade.
+
+Current shaders in repository:
+
+Screen Space Shadows (Requirements: [Optical Flow](https://github.com/martymcmodding/ReShade-Optical-Flow))
