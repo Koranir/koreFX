@@ -5,11 +5,11 @@
 #endif
 
 #ifndef LIGHT_SOURCE_SEARCH_STEPS_X
-    #define LIGHT_SOURCE_SEARCH_STEPS_X 48
+    #define LIGHT_SOURCE_SEARCH_STEPS_X 64
 #endif
 
 #ifndef LIGHT_SOURCE_SEARCH_STEPS_Y
-    #define LIGHT_SOURCE_SEARCH_STEPS_Y 27
+    #define LIGHT_SOURCE_SEARCH_STEPS_Y 36
 #endif
 
 #ifndef MULTISAMPLE_ENABLE
@@ -21,11 +21,11 @@
 #endif
 
 #ifndef GPU_SOURCE_CALC_STEPS
-    #define GPU_SOURCE_CALC_STEPS 20
+    #define GPU_SOURCE_CALC_STEPS 32
 #endif
 
 #ifndef SHADOW_MIPMAP_LEVEL
-    #define SHADOW_MIPMAP_LEVEL 4
+    #define SHADOW_MIPMAP_LEVEL 2
 #endif
 
 #ifndef SEARCH_DELAY
@@ -175,7 +175,7 @@ uniform float luma_correction_factor
     ui_tooltip = "Used to increase the brightness after shadow is cast.";
     ui_min = 0.;
     ui_max = 1.;
-> = .5;
+> = 0.;
 
 uniform float luma_adaption
 <
@@ -386,6 +386,16 @@ sampler final_sampler {
     Texture = final_tex;
 };
 
+texture texMotionVectors {
+    Width = BUFFER_WIDTH;
+    Height = BUFFER_HEIGHT;
+    Format = RG16F;
+};
+
+sampler motion_vector_sampler {
+    Texture = texMotionVectors;
+};
+
 float calc_diff(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
     return length(tex2D(ReShade::BackBuffer, tex_coord) - tex2D(old_back_sampler, tex_coord)) * difference_strength;
 }
@@ -488,7 +498,7 @@ float down_sample(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : 
     const float QUALITY = 12.0;
     for(float n = 0.0; n < PI; n += PI/NUMBER) {
 		for(float i = 1.0 / QUALITY; i <= 1.0; i += 1.0 / QUALITY) {
-			float n_brightness = length(
+			brightness += length(
                 tex2Dlod(
                     luma_sampler,
                     float4(
@@ -498,17 +508,14 @@ float down_sample(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : 
                     )
                 ).rgb
             );
-            if(n_brightness > brightness) {
-                brightness = n_brightness;
-            }
         }
     }
     // brightness += length(tex2Dlod(luma_sampler, float4(tex_coord, 0., 3)).rgb);
-    // brightness /= QUALITY * NUMBER - 15.;
+    brightness /= QUALITY * NUMBER - 15.;
     //brightness -= tex2Dfetch(luma_sampler_3, 0).r;
-    brightness *= brightness;// * (1. / tex2Dfetch(luma_sampler_3, 0).r);
+    brightness = brightness;// * (1. - tex2D(luma_sampler_2, tex_coord).r);
     //return brightness;
-    return lerp(tex2D(old_search_sampler, tex_coord).r, brightness, SEARCH_DELAY);
+    return lerp(tex2D(old_search_sampler, tex_coord + tex2D(motion_vector_sampler, tex_coord).xy).r, brightness, SEARCH_DELAY);
     //return saturate(brightness * (brightness + 0.1) * (1. / tex2Dfetch(luma_sampler_3, 0).r));
 };
 
@@ -558,6 +565,16 @@ float4 find_centre(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) :
 
     return float4(centre, found ? brightest : 0., 1.);
 };
+
+float Tonemap_ACES(float x) {
+    // Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return (x * (a * x + b)) / (x * (c * x + d) + e);
+}
 
 float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
     float fragment_depth = flip_depth ? (1. - tex2D(ReShade::DepthBuffer, tex_coord).r) : tex2D(ReShade::DepthBuffer, tex_coord).r;
@@ -628,7 +645,7 @@ float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOOR
                 (depth_difference > depth_offset / 1000) &&
                 ((depth_difference - assumed_thickness / 10000) < depth_offset / 1000)
             ) {
-                shadowed += 1. / (shadow_quality * GPU_SOURCE_CALC_STEPS);
+                shadowed += (1. / (shadow_quality * GPU_SOURCE_CALC_STEPS));
                 // shadowed += max(dotp, 0.) / 2.;
             }
         }
@@ -636,7 +653,9 @@ float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOOR
 
 #endif
 
-    shadowed = lerp(tex2D(old_shadow_sampler, tex_coord), shadowed, mot_delay + tex2D(diff_sampler, tex_coord)).x;
+    shadowed = Tonemap_ACES(shadowed);
+
+    shadowed = lerp(tex2D(old_shadow_sampler, tex_coord + tex2D(motion_vector_sampler, tex_coord).xy), shadowed, mot_delay + tex2D(diff_sampler, tex_coord)).x;
 
     return shadowed;
 };
@@ -645,14 +664,9 @@ float old_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : S
     return saturate(tex2D(shadow_sampler, tex_coord)).x;
 };
 
-float Tonemap_ACES(float x) {
-    // Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
-    const float a = 2.51;
-    const float b = 0.03;
-    const float c = 2.43;
-    const float d = 0.59;
-    const float e = 0.14;
-    return (x * (a * x + b)) / (x * (c * x + d) + e);
+float3 overlay(in float3 src, in float3 dst)
+{
+    return lerp(2.0 * src * dst, 1.0 - 2.0 * (1.0 - src) * (1.0-dst), step(0.5, dst));
 }
 
 float4 apply_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
@@ -662,8 +676,9 @@ float4 apply_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) 
     float mod_intensity = intensity * (tex2D(light_centre_sampler, 0).z);
     float final_shadow = Tonemap_ACES(pow(shadow * mod_intensity, 1. / shadow_ramp) * (1 + luma * shadow_luma_mod));
     //final_shadow = min(final_shadow, 1. - minimum_brightness);
-    color *= 1. - sqrt(final_shadow) * (1. - type);
-    color -= final_shadow * type;
+    color *= 1. - final_shadow * (1. - type);
+    color -= final_shadow * final_shadow * type;
+    //color = overlay(color.rgb, 1. - float3(final_shadow, final_shadow, final_shadow));
     return float4(color, 1);
 };
 
@@ -682,6 +697,9 @@ technique SSS
 <
     ui_tooltip =    "Highly expirimental screen-space shadows, based off\n"
                     "Lucas Melo (luluco250)'s TrackingRays.\n"
+                    "\n"
+                    "USE WITH OPTICAL FLOW FOR BEST RESULTS\n"
+                    "https://github.com/martymcmodding/ReShade-Optical-Flow\n"
                     "\n"
                     "Still a work in progress.\n"
                     "As of now, ghosting is a large problem.\n"
