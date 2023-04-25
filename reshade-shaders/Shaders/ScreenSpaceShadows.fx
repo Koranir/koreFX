@@ -49,9 +49,9 @@ uniform float depth_offset
     ui_type = "drag";
     ui_tooltip = "To prevent shadowing artifacts.\nTry to keep to a minimum.";
     ui_min = -1.;
-    ui_max = 1.;
-    ui_step = 0.001;
-> = 0.01;
+    ui_max = 10.;
+    ui_step = 0.01;
+> = 2.;
 
 uniform float assumed_thickness
 <
@@ -59,9 +59,18 @@ uniform float assumed_thickness
     ui_type = "drag";
     ui_tooltip = "This thickness will be used to cut off shadows from becoming too large.\nJust drag this till it looks good.";
     ui_min = 0.;
-    ui_max = 100.;
-    ui_step = 0.5;
-> = 40.;
+    ui_max = 1000.;
+    ui_step = 1;
+> = 180.;
+
+uniform float delete_contact_radius
+<
+    ui_label = "Light Contact Eraser";
+    ui_type = "drag";
+    ui_tooltip = "This radius will be used to stop super close things from casting shadows.\nJust drag this till it looks good.";
+    ui_min = 0.;
+    ui_max = 1000.;
+> = 250.;
 
 #ifdef MULTISAMPLE_ENABLE
 
@@ -85,6 +94,17 @@ uniform float mot_delay
     ui_min = 0.;
     ui_max = 1.;
 > = 0.05;
+
+/*uniform float fov
+<
+    ui_label = "Field of View";
+    ui_type = "slider";
+    ui_tooltip = "fov used to transpose to world space coords";
+    ui_min = 30.;
+    ui_max = 180.;
+> = 60.;*/
+
+#define fov 60
 
 uniform float intensity
 <
@@ -576,9 +596,24 @@ float Tonemap_ACES(float x) {
     return (x * (a * x + b)) / (x * (c * x + d) + e);
 }
 
+float3 UVtoPos(float2 tex_coord, float depth)
+{
+	float3 scrncoord = float3(tex_coord.xy*2-1, depth * RESHADE_DEPTH_LINEARIZATION_FAR_PLANE);
+	scrncoord.xy *= scrncoord.z;
+	scrncoord.x *= float(BUFFER_WIDTH) / BUFFER_HEIGHT;
+	scrncoord *= fov * 3.1415926 / 180;
+	//scrncoord.xy *= ;
+	
+	return scrncoord.xyz;
+}
+
 float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
+    matrix mat;
+
     float fragment_depth = flip_depth ? (1. - tex2D(ReShade::DepthBuffer, tex_coord).r) : tex2D(ReShade::DepthBuffer, tex_coord).r;
     float3 fragment_normal = tex2D(normal_sampler, tex_coord).xyz * 2. - 1.;
+
+    float3 fragment_position = UVtoPos(tex_coord, fragment_depth);
 
     float shadowed = 0.;
     float aspect_ratio = float(BUFFER_WIDTH) / BUFFER_HEIGHT;
@@ -624,28 +659,32 @@ float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOOR
 #else
 
     for(uint s = 0; s < GPU_SOURCE_CALC_STEPS; s++) {
-        float2 light_pos = tex2Dfetch(light_centre_sampler, uint2(s, 0)).xy;
+        float2 light_uv = tex2Dfetch(light_centre_sampler, uint2(s, 0)).xy;
         float light_depth = flip_depth
-            ? (1. - tex2D(ReShade::DepthBuffer, light_pos - float2(0, offset_down)).r)
-            : tex2D(ReShade::DepthBuffer, light_pos - float2(0, offset_down)).r;
+            ? (1. - tex2D(ReShade::DepthBuffer, light_uv - float2(0, offset_down)).r)
+            : tex2D(ReShade::DepthBuffer, light_uv - float2(0, offset_down)).r;
+        float3 light_pos = UVtoPos(light_uv, light_depth);
 
-        float3 light_dir = float3(light_pos, light_depth) - float3(tex_coord, fragment_depth);
-
+        float3 light_dir = light_pos - fragment_position;
 
         float dotp = saturate(dot(light_dir, fragment_normal));
 
         for(uint i = 1; i < shadow_quality; i++) {
             float traveled_percentage = float(i) / shadow_quality;
-            float2 traveled_coord = lerp(light_pos, tex_coord, traveled_percentage);
+            float2 traveled_coord = lerp(light_uv, tex_coord, traveled_percentage);
             float traveled_depth = flip_depth ? (1. - tex2D(ReShade::DepthBuffer, traveled_coord).r) : tex2D(ReShade::DepthBuffer, traveled_coord).r;
-            float lerped_depth = lerp(light_depth, fragment_depth, traveled_percentage);
+            float3 traveled_pos = UVtoPos(traveled_coord, traveled_depth);
+            float3 lerped_pos = lerp(light_pos, fragment_position, traveled_percentage);
 
-            float depth_difference = lerped_depth - traveled_depth;
+            float depth_difference = lerped_pos.z - traveled_pos.z;
             if(
                 (depth_difference > depth_offset / 1000) &&
-                ((depth_difference - assumed_thickness / 10000) < depth_offset / 1000)
+                ((depth_difference - assumed_thickness / 100) < depth_offset)
             ) {
-                shadowed += (1. / (shadow_quality * GPU_SOURCE_CALC_STEPS));
+                shadowed += (1. / (shadow_quality * GPU_SOURCE_CALC_STEPS))
+                    * ((length(traveled_pos - light_pos) > delete_contact_radius) 
+                    ? 1.
+                    : 0.);
                 // shadowed += max(dotp, 0.) / 2.;
             }
         }
