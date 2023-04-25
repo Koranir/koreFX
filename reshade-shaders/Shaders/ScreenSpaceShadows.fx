@@ -256,6 +256,7 @@ sampler back_sampler {
     SRGBTexture = true;
 };
 
+/*
 texture normal_tex {
     Width = BUFFER_WIDTH;
     Height = BUFFER_HEIGHT;
@@ -265,6 +266,7 @@ texture normal_tex {
 sampler normal_sampler {
     Texture = normal_tex;
 };
+*/
 
 texture old_back_buffer {
     Width = BUFFER_WIDTH;
@@ -420,6 +422,7 @@ float calc_diff(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV
     return length(tex2D(ReShade::BackBuffer, tex_coord) - tex2D(old_back_sampler, tex_coord)) * difference_strength;
 }
 
+/*
 float4 gen_normals(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
     float2 offset = 1. / float2(BUFFER_WIDTH, BUFFER_HEIGHT);
     float dn = tex2D(ReShade::DepthBuffer, tex_coord + float2(0, offset.y)).r;
@@ -437,6 +440,7 @@ float4 gen_normals(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) :
     normal = normal * 0.5 + 0.5;
     return float4(normal, 1.);
 }
+*/
 
 float luma_sample(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
     float luma = 0.;
@@ -608,10 +612,10 @@ float3 UVtoPos(float2 tex_coord, float depth)
 }
 
 float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
-    matrix mat;
+    // matrix mat;
 
     float fragment_depth = flip_depth ? (1. - tex2D(ReShade::DepthBuffer, tex_coord).r) : tex2D(ReShade::DepthBuffer, tex_coord).r;
-    float3 fragment_normal = tex2D(normal_sampler, tex_coord).xyz * 2. - 1.;
+    // float3 fragment_normal = tex2D(normal_sampler, tex_coord).xyz * 2. - 1.;
 
     float3 fragment_position = UVtoPos(tex_coord, fragment_depth);
 
@@ -637,7 +641,7 @@ float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOOR
                     float2 traveled_coord = lerp(light_pos, tex_coord, traveled_percentage);
                     float traveled_depth = flip_depth ? (1. - tex2D(ReShade::DepthBuffer, traveled_coord).r) : tex2D(ReShade::DepthBuffer, traveled_coord).r;
 
-                    float dotp = dot(light_normal, fragment_normal);
+                    // float dotp = dot(light_normal, fragment_normal);
 
                     float light_depth = flip_depth
                         ? (1. - tex2D(ReShade::DepthBuffer, light_pos - float2(0, offset_down)).r)
@@ -665,9 +669,9 @@ float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOOR
             : tex2D(ReShade::DepthBuffer, light_uv - float2(0, offset_down)).r;
         float3 light_pos = UVtoPos(light_uv, light_depth);
 
-        float3 light_dir = light_pos - fragment_position;
+        // float3 light_dir = light_pos - fragment_position;
 
-        float dotp = saturate(dot(light_dir, fragment_normal));
+        // float dotp = saturate(dot(light_dir, fragment_normal));
 
         for(uint i = 1; i < shadow_quality; i++) {
             float traveled_percentage = float(i) / shadow_quality;
@@ -755,11 +759,13 @@ technique SSS
         PixelShader = calc_diff;
         RenderTarget = diff_buffer;
     }
+    /*
     pass Normals {
         VertexShader = PostProcessVS;
         PixelShader = gen_normals;
         RenderTarget = normal_tex;
     }
+    */
     pass LumaSample {
         VertexShader = PostProcessVS;
         PixelShader = luma_sample;
