@@ -111,7 +111,7 @@ uniform float detection_sensitivity
     ui_type = "slider";
     ui_tooltip = "Pay attention to this setting.";
     ui_min = 0.;
-    ui_max = 1.;
+    ui_max = 2.;
 > = 1.;
 
 /*uniform float fov
