@@ -20,9 +20,15 @@
     #endif
 #endif
 
-#ifndef GPU_SOURCE_CALC_STEPS
-    #define GPU_SOURCE_CALC_STEPS 32
+#ifndef GPU_SOURCE_CALC_STEPS_X
+    #define GPU_SOURCE_CALC_STEPS_X 16
 #endif
+
+#ifndef GPU_SOURCE_CALC_STEPS_Y
+    #define GPU_SOURCE_CALC_STEPS_Y 9
+#endif
+
+#define GPU_SOURCE_CALC_STEPS GPU_SOURCE_CALC_STEPS_X * GPU_SOURCE_CALC_STEPS_Y
 
 #ifndef SHADOW_MIPMAP_LEVEL
     #define SHADOW_MIPMAP_LEVEL 2
@@ -246,6 +252,18 @@ uniform float normal_depth
     ui_type = "drag";
 > = 30.;
 
+uniform bool show_lights
+<
+    ui_label = "Show lights";
+    ui_tooltip = "Take a peek behind the scenes";
+> = false;
+
+uniform bool show_frag_depth
+<
+    ui_label = "Show fragment depth";
+    ui_tooltip = "Take a peek behind the scenes";
+> = false;
+
 uniform float random_value < source = "random"; min = -1.; max = 1.; >;
 uniform int framecount < source = "framecount"; >;
 
@@ -289,8 +307,8 @@ sampler diff_sampler {
 };
 
 texture search_tex {
-    Width = LIGHT_SOURCE_SEARCH_STEPS_X;
-    Height = LIGHT_SOURCE_SEARCH_STEPS_Y;
+    Width = BUFFER_WIDTH / 2 / SHADOW_MIPMAP_LEVEL;
+    Height = BUFFER_WIDTH / 2 / SHADOW_MIPMAP_LEVEL;
     Format = R8;
 };
 
@@ -361,7 +379,8 @@ sampler luma_old_sampler {
 };
 
 texture light_centre {
-    Width = GPU_SOURCE_CALC_STEPS;
+    Width = GPU_SOURCE_CALC_STEPS_X;
+    Height = GPU_SOURCE_CALC_STEPS_Y;
     Format = RGBA8;
 };
 
@@ -518,8 +537,8 @@ float down_sample(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : 
     float brightness = 0.;
 
     const float PI = 6.2831;
-    const float NUMBER = 32.0;
-    const float QUALITY = 12.0;
+    const float NUMBER = 16.0;
+    const float QUALITY = 4.0;
     for(float n = 0.0; n < PI; n += PI/NUMBER) {
 		for(float i = 1.0 / QUALITY; i <= 1.0; i += 1.0 / QUALITY) {
 			brightness += length(
@@ -561,6 +580,12 @@ float hash(float2 q)
 #define hash(p)  frac(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453)
 
 float4 find_centre(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
+    float2 segment_size = 1. / float2(
+        GPU_SOURCE_CALC_STEPS_X,
+        GPU_SOURCE_CALC_STEPS_Y
+    );
+    float2 segment_begin = tex_coord - segment_size / 2.;
+
     float2 centre = float2(0.5, 0.5);
     float luma = pow(tex2Dfetch(luma_sampler_3, 0).r, 2);
     float brightest = luma;
@@ -568,10 +593,11 @@ float4 find_centre(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) :
     bool found = false;
     for(uint x = 0; x < LIGHT_SOURCE_SEARCH_STEPS_X; x++) {
         for(uint y = 0; y < LIGHT_SOURCE_SEARCH_STEPS_Y; y++) {
-            float2 sample_pos = float2(
+            float2 search_per = float2(
                 float(x) / LIGHT_SOURCE_SEARCH_STEPS_X,
                 float(y) / LIGHT_SOURCE_SEARCH_STEPS_Y
             );
+            float2 sample_pos = segment_begin + search_per * segment_size;
 
             float sample_intensity = length(tex2D(search_sampler, sample_pos).rgb);
 
@@ -579,7 +605,7 @@ float4 find_centre(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) :
             float hash_y = (y * GPU_SOURCE_CALC_STEPS + random_value);
             float hashed = hash(hash_x * hash_y) - 0.5;
 
-            if((sample_intensity * (1 + hashed * randomness) * (1. - length(tex_coord) * LIGHT_FIX_FACTOR)) > brightest) {
+            if((sample_intensity * (1 + hashed * randomness) * (1. - length(search_per) * LIGHT_FIX_FACTOR)) > brightest) {
                 centre = sample_pos;
                 brightest = sample_intensity;
                 found = true;
@@ -587,6 +613,7 @@ float4 find_centre(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) :
         }
     }
 
+    //return float4(segment_begin, 1., 0.);
     return float4(centre, found ? brightest : 0., 1.);
 };
 
@@ -611,10 +638,15 @@ float3 UVtoPos(float2 tex_coord, float depth)
 	return scrncoord.xyz;
 }
 
+#define FlipDepth(x) (flip_depth ? (1. - x) : x)
+
 float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
     // matrix mat;
-
-    float fragment_depth = flip_depth ? (1. - tex2D(ReShade::DepthBuffer, tex_coord).r) : tex2D(ReShade::DepthBuffer, tex_coord).r;
+#ifndef GEN_HEIGHTMAP
+    float fragment_depth = FlipDepth(tex2D(ReShade::DepthBuffer, tex_coord).r);
+#else
+    float fragment_depth = FlipDepth(length(tex2D(ReShade::BackBuffer, tex_coord).rgb));
+#endif
     // float3 fragment_normal = tex2D(normal_sampler, tex_coord).xyz * 2. - 1.;
 
     float3 fragment_position = UVtoPos(tex_coord, fragment_depth);
@@ -662,34 +694,44 @@ float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOOR
 
 #else
 
-    for(uint s = 0; s < GPU_SOURCE_CALC_STEPS; s++) {
-        float2 light_uv = tex2Dfetch(light_centre_sampler, uint2(s, 0)).xy;
-        float light_depth = flip_depth
-            ? (1. - tex2D(ReShade::DepthBuffer, light_uv - float2(0, offset_down)).r)
-            : tex2D(ReShade::DepthBuffer, light_uv - float2(0, offset_down)).r;
-        float3 light_pos = UVtoPos(light_uv, light_depth);
+    for(uint x = 0; x < GPU_SOURCE_CALC_STEPS_X; x++) {
+        for(uint y = 0; y < GPU_SOURCE_CALC_STEPS_Y; y++) {
+            float2 light_uv = tex2Dfetch(light_centre_sampler, uint2(x, y)).xy;
+#ifndef GEN_HEIGHTMAP
+            float light_depth = flip_depth
+                ? (1. - tex2D(ReShade::DepthBuffer, light_uv - float2(0, offset_down)).r)
+                : tex2D(ReShade::DepthBuffer, light_uv - float2(0, offset_down)).r;
+#else
+            float light_depth = -.3;
+#endif
+            float3 light_pos = UVtoPos(light_uv, light_depth);
 
-        // float3 light_dir = light_pos - fragment_position;
+            // float3 light_dir = light_pos - fragment_position;
 
-        // float dotp = saturate(dot(light_dir, fragment_normal));
+            // float dotp = saturate(dot(light_dir, fragment_normal));
 
-        for(uint i = 1; i < shadow_quality; i++) {
-            float traveled_percentage = float(i) / shadow_quality;
-            float2 traveled_coord = lerp(light_uv, tex_coord, traveled_percentage);
-            float traveled_depth = flip_depth ? (1. - tex2D(ReShade::DepthBuffer, traveled_coord).r) : tex2D(ReShade::DepthBuffer, traveled_coord).r;
-            float3 traveled_pos = UVtoPos(traveled_coord, traveled_depth);
-            float3 lerped_pos = lerp(light_pos, fragment_position, traveled_percentage);
+            for(uint i = 1; i < shadow_quality; i++) {
+                float traveled_percentage = float(i) / shadow_quality;
+                float2 traveled_coord = lerp(light_uv, tex_coord, traveled_percentage);
+#ifndef GEN_HEIGHTMAP 
+                float traveled_depth = flip_depth ? (1. - tex2D(ReShade::DepthBuffer, traveled_coord).r) : tex2D(ReShade::DepthBuffer, traveled_coord).r;
+#else
+                float traveled_depth = FlipDepth(length(tex2D(ReShade::BackBuffer, traveled_coord).rgb));
+#endif
+                float3 traveled_pos = UVtoPos(traveled_coord, traveled_depth);
+                float3 lerped_pos = lerp(light_pos, fragment_position, traveled_percentage);
 
-            float depth_difference = lerped_pos.z - traveled_pos.z;
-            if(
-                (depth_difference > depth_offset / 1000) &&
-                ((depth_difference - assumed_thickness / 100) < depth_offset)
-            ) {
-                shadowed += (1. / (shadow_quality * GPU_SOURCE_CALC_STEPS))
-                    * ((length(traveled_pos - light_pos) > delete_contact_radius) 
-                    ? 1.
-                    : 0.);
-                // shadowed += max(dotp, 0.) / 2.;
+                float depth_difference = lerped_pos.z - traveled_pos.z;
+                if(
+                    (depth_difference > depth_offset / 1000) &&
+                    ((depth_difference - assumed_thickness / 100) < depth_offset)
+                ) {
+                    shadowed += (1. / (shadow_quality * GPU_SOURCE_CALC_STEPS))
+                        * ((length(traveled_pos - light_pos) > delete_contact_radius) 
+                        ? 1.
+                        : 0.);
+                    // shadowed += max(dotp, 0.) / 2.;
+                }
             }
         }
     }
@@ -700,7 +742,11 @@ float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOOR
 
     shadowed = lerp(tex2D(old_shadow_sampler, tex_coord + tex2D(motion_vector_sampler, tex_coord).xy), shadowed, mot_delay + tex2D(diff_sampler, tex_coord)).x;
 
-    return shadowed;
+    if(show_frag_depth) {
+        return fragment_depth;
+    } else {
+        return shadowed;
+    }
 };
 
 float old_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
@@ -733,6 +779,20 @@ float4 show_image(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : 
 };
 
 float4 old_back_buffer_copy(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
+    return tex2D(ReShade::BackBuffer, tex_coord);
+}
+
+float4 display_debug(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
+    if(show_lights) {
+        for(uint x = 0; x < GPU_SOURCE_CALC_STEPS_X; x++) {
+            for(uint y = 0; y < GPU_SOURCE_CALC_STEPS_Y; y++) {
+                float2 light_uv = tex2Dfetch(light_centre_sampler, uint2(x, y)).xy;
+                if(length(light_uv - tex_coord) < 0.02) {
+                    return float4(tex2Dfetch(light_centre_sampler, uint2(x, y)).z, 0., 0., 1.);
+                }
+            }
+        }
+    }
     return tex2D(ReShade::BackBuffer, tex_coord);
 }
 
@@ -845,5 +905,9 @@ technique SSS
     pass Final {
         VertexShader = PostProcessVS;
         PixelShader = show_image;
+    }
+    pass ShowCenter {
+        VertexShader = PostProcessVS;
+        PixelShader = display_debug;
     }
 }
