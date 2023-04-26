@@ -5,11 +5,11 @@
 #endif
 
 #ifndef LIGHT_SOURCE_SEARCH_STEPS_X
-    #define LIGHT_SOURCE_SEARCH_STEPS_X 64
+    #define LIGHT_SOURCE_SEARCH_STEPS_X 26
 #endif
 
 #ifndef LIGHT_SOURCE_SEARCH_STEPS_Y
-    #define LIGHT_SOURCE_SEARCH_STEPS_Y 36
+    #define LIGHT_SOURCE_SEARCH_STEPS_Y 16
 #endif
 
 #ifndef MULTISAMPLE_ENABLE
@@ -21,11 +21,11 @@
 #endif
 
 #ifndef GPU_SOURCE_CALC_STEPS_X
-    #define GPU_SOURCE_CALC_STEPS_X 16
+    #define GPU_SOURCE_CALC_STEPS_X 8
 #endif
 
 #ifndef GPU_SOURCE_CALC_STEPS_Y
-    #define GPU_SOURCE_CALC_STEPS_Y 9
+    #define GPU_SOURCE_CALC_STEPS_Y 4
 #endif
 
 #define GPU_SOURCE_CALC_STEPS GPU_SOURCE_CALC_STEPS_X * GPU_SOURCE_CALC_STEPS_Y
@@ -112,14 +112,20 @@ uniform float mot_delay
 
 #define fov 60
 
+/*uniform int blend_mode <
+	ui_type = "radio";
+    ui_label = "Blend Mode";
+	ui_items = "Normal\0";
+> = 2;*/
+
 uniform float intensity
 <
     ui_label = "Shadow Intensity";
     ui_type = "slider";
     ui_tooltip = "Shadow darkness.";
     ui_min = 0.;
-    ui_max = 25.;
-> = 2.5;
+    ui_max = 5.;
+> = 1.;
 
 uniform float type
 <
@@ -183,7 +189,7 @@ uniform float shadow_ramp
     ui_tooltip = "Shadow thickness.";
     ui_min = 0.;
     ui_max = 3.;
-> = 1.7;
+> = 0.9;
 
 uniform float shadow_luma_mod
 <
@@ -245,12 +251,12 @@ uniform float difference_strength
     ui_max = 8.;
 > = 0.5;
 
-uniform float normal_depth
+/*uniform float normal_depth
 <
     ui_label = "Normalized Depth";
     ui_tooltip = "Currently useless.";
     ui_type = "drag";
-> = 30.;
+> = 30.;*/
 
 uniform bool show_lights
 <
@@ -258,11 +264,11 @@ uniform bool show_lights
     ui_tooltip = "Take a peek behind the scenes";
 > = false;
 
-uniform bool show_frag_depth
+/*uniform bool show_frag_depth
 <
     ui_label = "Show fragment depth";
     ui_tooltip = "Take a peek behind the scenes";
-> = false;
+> = false;*/
 
 uniform float random_value < source = "random"; min = -1.; max = 1.; >;
 uniform int framecount < source = "framecount"; >;
@@ -556,7 +562,8 @@ float down_sample(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : 
     // brightness += length(tex2Dlod(luma_sampler, float4(tex_coord, 0., 3)).rgb);
     brightness /= QUALITY * NUMBER - 15.;
     //brightness -= tex2Dfetch(luma_sampler_3, 0).r;
-    brightness = brightness;// * (1. - tex2D(luma_sampler_2, tex_coord).r);
+    brightness += sqrt(brightness) * 1.5;// * (1. - tex2D(luma_sampler_2, tex_coord).r);
+    brightness += pow(brightness, 2.);
     //return brightness;
     return lerp(tex2D(old_search_sampler, tex_coord + tex2D(motion_vector_sampler, tex_coord).xy).r, brightness, SEARCH_DELAY);
     //return saturate(brightness * (brightness + 0.1) * (1. / tex2Dfetch(luma_sampler_3, 0).r));
@@ -599,7 +606,7 @@ float4 find_centre(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) :
             );
             float2 sample_pos = segment_begin + search_per * segment_size;
 
-            float sample_intensity = length(tex2D(search_sampler, sample_pos).rgb);
+            float sample_intensity = pow(length(tex2D(search_sampler, sample_pos).rgb), 2.);
 
             float hash_x = ((tex_coord.x + x) * GPU_SOURCE_CALC_STEPS + random_value);
             float hash_y = (y * GPU_SOURCE_CALC_STEPS + random_value);
@@ -742,11 +749,11 @@ float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOOR
 
     shadowed = lerp(tex2D(old_shadow_sampler, tex_coord + tex2D(motion_vector_sampler, tex_coord).xy), shadowed, mot_delay + tex2D(diff_sampler, tex_coord)).x;
 
-    if(show_frag_depth) {
-        return fragment_depth;
-    } else {
+    //if(show_frag_depth) {
+    //    return fragment_depth;
+    //} else {
         return shadowed;
-    }
+    //}
 };
 
 float old_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
@@ -758,15 +765,19 @@ float3 overlay(in float3 src, in float3 dst)
     return lerp(2.0 * src * dst, 1.0 - 2.0 * (1.0 - src) * (1.0-dst), step(0.5, dst));
 }
 
-float4 apply_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
+float final_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
     float luma = sqrt(tex2Dfetch(luma_sampler_3, 0).r);
-    float shadow = tex2D(shadow_sampler, tex_coord).r;
+    float shadow = tex2D(old_shadow_sampler, tex_coord).r;
+    float mod_intensity = intensity;
+    return Tonemap_ACES(pow(shadow * mod_intensity, 1. / shadow_ramp) * (1 + luma * shadow_luma_mod));
+}
+
+float4 apply_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
     float3 color = tex2D(ReShade::BackBuffer, tex_coord).rgb;
-    float mod_intensity = intensity * (tex2D(light_centre_sampler, 0).z);
-    float final_shadow = Tonemap_ACES(pow(shadow * mod_intensity, 1. / shadow_ramp) * (1 + luma * shadow_luma_mod));
+    float shadow = tex2D(shadow_sampler, tex_coord).r;
     //final_shadow = min(final_shadow, 1. - minimum_brightness);
-    color *= 1. - final_shadow * (1. - type);
-    color -= final_shadow * final_shadow * type;
+    color *= 1. - shadow * (1. - type);
+    color -= shadow * shadow * type;
     //color = overlay(color.rgb, 1. - float3(final_shadow, final_shadow, final_shadow));
     return float4(color, 1);
 };
@@ -787,8 +798,8 @@ float4 display_debug(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD)
         for(uint x = 0; x < GPU_SOURCE_CALC_STEPS_X; x++) {
             for(uint y = 0; y < GPU_SOURCE_CALC_STEPS_Y; y++) {
                 float2 light_uv = tex2Dfetch(light_centre_sampler, uint2(x, y)).xy;
-                if(length(light_uv - tex_coord) < 0.02) {
-                    return float4(tex2Dfetch(light_centre_sampler, uint2(x, y)).z, 0., 0., 1.);
+                if(length(light_uv - tex_coord) < 0.01) {
+                    return tex2Dfetch(light_centre_sampler, uint2(x, y)).z;
                 }
             }
         }
@@ -865,6 +876,11 @@ technique SSS
         VertexShader = PostProcessVS;
         PixelShader = old_shadow;
         RenderTarget = old_shadow_map;
+    }
+    pass CorrectShadow {
+        VertexShader = PostProcessVS;
+        PixelShader = final_shadow;
+        RenderTarget = shadow_map;
     }
     pass ShadowPass {
         VertexShader = PostProcessVS;
