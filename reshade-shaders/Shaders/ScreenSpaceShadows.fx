@@ -1,5 +1,9 @@
 #include "ReShade.fxh"
 
+#ifndef DOWNSAMPLE_BY
+    #define DOWNSAMPLE_BY 1
+#endif
+
 #ifndef LIGHT_FIX_FACTOR
     #define LIGHT_FIX_FACTOR 0.25
 #endif
@@ -100,6 +104,15 @@ uniform float mot_delay
     ui_min = 0.;
     ui_max = 1.;
 > = 0.05;
+
+uniform float detection_sensitivity
+<
+    ui_label = "Light Detection Sensitivity";
+    ui_type = "slider";
+    ui_tooltip = "Pay attention to this setting.";
+    ui_min = 0.;
+    ui_max = 1.;
+> = 1.;
 
 /*uniform float fov
 <
@@ -293,8 +306,8 @@ sampler normal_sampler {
 */
 
 texture old_back_buffer {
-    Width = BUFFER_WIDTH;
-    Height = BUFFER_HEIGHT;
+    Width = BUFFER_WIDTH / DOWNSAMPLE_BY;
+    Height = BUFFER_HEIGHT / DOWNSAMPLE_BY;
     Format = RGBA8;
 };
 
@@ -303,8 +316,8 @@ sampler old_back_sampler {
 };
 
 texture diff_buffer {
-    Width = BUFFER_WIDTH;
-    Height = BUFFER_HEIGHT;
+    Width = BUFFER_WIDTH / DOWNSAMPLE_BY;
+    Height = BUFFER_HEIGHT / DOWNSAMPLE_BY;
     Format = R8;
 };
 
@@ -313,8 +326,8 @@ sampler diff_sampler {
 };
 
 texture search_tex {
-    Width = BUFFER_WIDTH / 2 / SHADOW_MIPMAP_LEVEL;
-    Height = BUFFER_WIDTH / 2 / SHADOW_MIPMAP_LEVEL;
+    Width = BUFFER_WIDTH / 2 / SHADOW_MIPMAP_LEVEL / DOWNSAMPLE_BY;
+    Height = BUFFER_WIDTH / 2 / SHADOW_MIPMAP_LEVEL / DOWNSAMPLE_BY;
     Format = R8;
 };
 
@@ -405,8 +418,8 @@ sampler old_light_centre_sampler {
 };*/
 
 texture shadow_map {
-    Width = BUFFER_WIDTH / SHADOW_MIPMAP_LEVEL;
-    Height = BUFFER_HEIGHT / SHADOW_MIPMAP_LEVEL;
+    Width = BUFFER_WIDTH / SHADOW_MIPMAP_LEVEL / DOWNSAMPLE_BY;
+    Height = BUFFER_HEIGHT / SHADOW_MIPMAP_LEVEL / DOWNSAMPLE_BY;
     Format = R8;
 };
 
@@ -415,8 +428,8 @@ sampler shadow_sampler {
 };
 
 texture old_shadow_map {
-    Width = BUFFER_WIDTH / SHADOW_MIPMAP_LEVEL;
-    Height = BUFFER_HEIGHT / SHADOW_MIPMAP_LEVEL;
+    Width = BUFFER_WIDTH / SHADOW_MIPMAP_LEVEL / DOWNSAMPLE_BY;
+    Height = BUFFER_HEIGHT / SHADOW_MIPMAP_LEVEL / DOWNSAMPLE_BY;
     Format = R8;
 };
 
@@ -561,6 +574,7 @@ float down_sample(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : 
     }
     // brightness += length(tex2Dlod(luma_sampler, float4(tex_coord, 0., 3)).rgb);
     brightness /= QUALITY * NUMBER - 15.;
+    brightness *= detection_sensitivity;
     //brightness -= tex2Dfetch(luma_sampler_3, 0).r;
     brightness += sqrt(brightness) * 1.5;// * (1. - tex2D(luma_sampler_2, tex_coord).r);
     brightness += pow(brightness, 2.);
