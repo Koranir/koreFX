@@ -1,7 +1,7 @@
 #include "ReShade.fxh"
 
 #ifndef DOWNSAMPLE_BY
-    #define DOWNSAMPLE_BY 1
+    #define DOWNSAMPLE_BY 2
 #endif
 
 #ifndef LIGHT_FIX_FACTOR
@@ -9,11 +9,11 @@
 #endif
 
 #ifndef LIGHT_SOURCE_SEARCH_STEPS_X
-    #define LIGHT_SOURCE_SEARCH_STEPS_X 26
+    #define LIGHT_SOURCE_SEARCH_STEPS_X 18
 #endif
 
 #ifndef LIGHT_SOURCE_SEARCH_STEPS_Y
-    #define LIGHT_SOURCE_SEARCH_STEPS_Y 16
+    #define LIGHT_SOURCE_SEARCH_STEPS_Y 12
 #endif
 
 #ifndef MULTISAMPLE_ENABLE
@@ -25,17 +25,17 @@
 #endif
 
 #ifndef GPU_SOURCE_CALC_STEPS_X
-    #define GPU_SOURCE_CALC_STEPS_X 8
+    #define GPU_SOURCE_CALC_STEPS_X 4
 #endif
 
 #ifndef GPU_SOURCE_CALC_STEPS_Y
-    #define GPU_SOURCE_CALC_STEPS_Y 4
+    #define GPU_SOURCE_CALC_STEPS_Y 3
 #endif
 
 #define GPU_SOURCE_CALC_STEPS GPU_SOURCE_CALC_STEPS_X * GPU_SOURCE_CALC_STEPS_Y
 
-#ifndef SHADOW_MIPMAP_LEVEL
-    #define SHADOW_MIPMAP_LEVEL 2
+#ifndef SHADOW_DOWNSAMPLE_LEVEL
+    #define SHADOW_DOWNSAMPLE_LEVEL 3
 #endif
 
 #ifndef SEARCH_DELAY
@@ -49,17 +49,17 @@ uniform int shadow_quality
     ui_label = "Quality";
     ui_tooltip = "The deafult is more than enough, but you can add more.";
     ui_min  = 8;
-    ui_max = 128;
+    ui_max = 64;
     ui_type = "slider";
-> = 32;
+> = 12;
 
 uniform float depth_offset
 <
     ui_label = "Offset";
     ui_type = "drag";
     ui_tooltip = "To prevent shadowing artifacts.\nTry to keep to a minimum.";
-    ui_min = -1.;
-    ui_max = 10.;
+    ui_min = -5.;
+    ui_max = 5.;
     ui_step = 0.01;
 > = 2.;
 
@@ -112,7 +112,7 @@ uniform float detection_sensitivity
     ui_tooltip = "Pay attention to this setting.";
     ui_min = 0.;
     ui_max = 2.;
-> = 1.;
+> = 0.8;
 
 /*uniform float fov
 <
@@ -212,6 +212,15 @@ uniform float shadow_luma_mod
     ui_min = -1.;
     ui_max = 1.;
 > = 0.2;
+
+uniform float shadow_luma_correction
+<
+    ui_label = "Shadow Luma Correction";
+    ui_type = "slider";
+    ui_tooltip = "Used to mitigate huge shadows.";
+    ui_min = 0.;
+    ui_max = 10.;
+> = 4.;
 
 uniform float luma_correction_factor
 <
@@ -326,8 +335,8 @@ sampler diff_sampler {
 };
 
 texture search_tex {
-    Width = BUFFER_WIDTH / 2 / SHADOW_MIPMAP_LEVEL / DOWNSAMPLE_BY;
-    Height = BUFFER_WIDTH / 2 / SHADOW_MIPMAP_LEVEL / DOWNSAMPLE_BY;
+    Width = BUFFER_WIDTH / 2 / SHADOW_DOWNSAMPLE_LEVEL / DOWNSAMPLE_BY;
+    Height = BUFFER_WIDTH / 2 / SHADOW_DOWNSAMPLE_LEVEL / DOWNSAMPLE_BY;
     Format = R8;
 };
 
@@ -381,6 +390,14 @@ sampler comp_luma_sampler {
     Texture = comp_luma_tex;
 };
 
+texture shadow_luma_tex {
+    Format = R8;
+};
+
+sampler shadow_luma_sampler {
+    Texture = comp_luma_tex;
+};
+
 texture luma_diff_tex {
     Format = R8;
 };
@@ -418,8 +435,8 @@ sampler old_light_centre_sampler {
 };*/
 
 texture shadow_map {
-    Width = BUFFER_WIDTH / SHADOW_MIPMAP_LEVEL / DOWNSAMPLE_BY;
-    Height = BUFFER_HEIGHT / SHADOW_MIPMAP_LEVEL / DOWNSAMPLE_BY;
+    Width = BUFFER_WIDTH / SHADOW_DOWNSAMPLE_LEVEL / DOWNSAMPLE_BY;
+    Height = BUFFER_HEIGHT / SHADOW_DOWNSAMPLE_LEVEL / DOWNSAMPLE_BY;
     Format = R8;
 };
 
@@ -428,8 +445,8 @@ sampler shadow_sampler {
 };
 
 texture old_shadow_map {
-    Width = BUFFER_WIDTH / SHADOW_MIPMAP_LEVEL / DOWNSAMPLE_BY;
-    Height = BUFFER_HEIGHT / SHADOW_MIPMAP_LEVEL / DOWNSAMPLE_BY;
+    Width = BUFFER_WIDTH / SHADOW_DOWNSAMPLE_LEVEL / DOWNSAMPLE_BY;
+    Height = BUFFER_HEIGHT / SHADOW_DOWNSAMPLE_LEVEL / DOWNSAMPLE_BY;
     Format = R8;
 };
 
@@ -504,6 +521,18 @@ float comp_luma_sample(float4 position : SV_POSITION, float2 tex_coord : TEXCOOR
     return luma / 9;
 };
 
+float shadow_luma_sample(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
+    float luma = 0.;
+    for(int x = -1; x <= 1; x++) {
+        for(int y = -1; y <= 1; y++) {
+            float2 mod_coord = float2(x, y) * (1./float2(LIGHT_SOURCE_SEARCH_STEPS_X, LIGHT_SOURCE_SEARCH_STEPS_Y));
+            float4 col = tex2Dlod(shadow_sampler, float4(tex_coord + mod_coord, 0, 0));
+            luma += dot(col.xyz, LUMA_COEFFICIENT);
+        }
+    }
+    return luma / 9;
+};
+
 float luma_diff(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
     float old_luma = tex2Dfetch(luma_sampler_3, 0).r;
     float new_luma = tex2Dfetch(comp_luma_sampler, 0).r;
@@ -542,6 +571,19 @@ float comp_luma_sample_3(float4 position : SV_POSITION, float2 tex_coord : TEXCO
     luma /= (LIGHT_SOURCE_SEARCH_STEPS_X / 16) * (LIGHT_SOURCE_SEARCH_STEPS_Y / 16);
     float old_luma = tex2Dfetch(comp_luma_sampler, 0).r;
     return lerp(old_luma, luma, luma_adaption);
+};
+
+float shadow_luma_sample_3(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
+    float2 pixel_size = float2(8 * LIGHT_SOURCE_SEARCH_STEPS_X / float(BUFFER_RCP_WIDTH), 8 * LIGHT_SOURCE_SEARCH_STEPS_Y / float(BUFFER_HEIGHT));
+    float2 start_pixel = pixel_size / 2.;
+    float luma = 0.;
+    for(uint x = 0; x < LIGHT_SOURCE_SEARCH_STEPS_X / 16; x++) {
+        for(uint y = 0; y < LIGHT_SOURCE_SEARCH_STEPS_Y / 16; y++) {
+            luma += tex2D(luma_sampler_2, float2(x, y) * pixel_size + start_pixel).x;
+        }
+    }
+    luma /= (LIGHT_SOURCE_SEARCH_STEPS_X / 16) * (LIGHT_SOURCE_SEARCH_STEPS_Y / 16);
+    return luma;
 };
 
 void luma_blend(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD, out float old_luma : SV_TARGET0, out float comp_luma : SV_TARGET1) {
@@ -788,7 +830,7 @@ float final_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) :
 
 float4 apply_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
     float3 color = tex2D(ReShade::BackBuffer, tex_coord).rgb;
-    float shadow = tex2D(shadow_sampler, tex_coord).r;
+    float shadow = tex2D(shadow_sampler, tex_coord).r - pow(tex2Dfetch(shadow_luma_sampler, 0).r, 1. / shadow_luma_correction);
     //final_shadow = min(final_shadow, 1. - minimum_brightness);
     color *= 1. - shadow * (1. - type);
     color -= shadow * shadow * type;
@@ -836,7 +878,7 @@ technique SSS
                     "And most importantly the GPU_SOURCE_CALC,\n"
                     "LIGHT_SOURCE_SEARCH_STEPS_X and Y preprocessors.\n"
                     "Quality can be increased further with the\n"
-                    "SHADOW_MIPMAP_LEVEL preprocessor.";
+                    "SHADOW_DOWNSAMPLE_LEVEL preprocessor.";
 >
 {
     pass Diff {
@@ -895,6 +937,21 @@ technique SSS
         VertexShader = PostProcessVS;
         PixelShader = final_shadow;
         RenderTarget = shadow_map;
+    }
+    pass ShadowLumaSample {
+        VertexShader = PostProcessVS;
+        PixelShader = shadow_luma_sample;
+        RenderTarget = luma_tex;
+    }
+    pass ShadowLumaSample2 {
+        VertexShader = PostProcessVS;
+        PixelShader = luma_sample_2;
+        RenderTarget = luma_tex_2;
+    }
+    pass ShadowLumaSample3 {
+        VertexShader = PostProcessVS;
+        PixelShader = shadow_luma_sample_3;
+        RenderTarget = shadow_luma_tex;
     }
     pass ShadowPass {
         VertexShader = PostProcessVS;
