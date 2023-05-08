@@ -52,7 +52,7 @@ uniform float detect_mask_sensitivity <
     ui_tooltip = "";
     ui_min = -1.0; ui_max = 1.0;
     ui_step = 0.05;
-> = 0.0;
+> = 0.25;
 
 uniform int algorithm_type <
     ui_type = "combo";
@@ -60,10 +60,13 @@ uniform int algorithm_type <
     ui_label = "Algorithm";
     ui_tooltip = "Which algorithm to detect with";
     ui_items = "Normalized Dot Product\0Normalized Difference\0Absolute Difference\0";
-> = 0;
+> = 2;
 
 texture2D start_back_tex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; MipLevels = 1; Format = RGBA32F; };
 sampler2D start_back_sampler { Texture = start_back_tex; MipLODBias = 0; };
+
+texture2D old_start_back_tex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; MipLevels = 1; Format = RGBA32F; };
+sampler2D old_start_back_sampler { Texture = old_start_back_tex; MipLODBias = 0; };
 
 texture2D d_tex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; MipLevels = 1; Format = RGBA32F; };
 sampler2D d_samp { Texture = d_tex; MipLODBias = 0; };
@@ -71,14 +74,17 @@ sampler2D d_samp { Texture = d_tex; MipLODBias = 0; };
 texture2D generated_mask_texture { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; MipLevels = 1; Format = R32F; };
 sampler2D generated_mask_sampler { Texture = generated_mask_texture; MipLODBias = 0; };
 
+texture2D old_generated_mask_texture { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; MipLevels = 1; Format = R32F; };
+sampler2D old_generated_mask_sampler { Texture = old_generated_mask_texture; MipLODBias = 0; };
+
 void generate_mask(float4 vpos : SV_Position, float2 texcoord : TexCoord, out float mask : SV_Target0, out float4 start_col : SV_Target1, out float4 col_dot : SV_Target2) {
-    start_col = tex2D(start_back_sampler, texcoord);
     if(reset_mask) {
         mask = 0.;
         start_col = tex2D(ReShade::BackBuffer, texcoord);
+        col_dot = float4(0., 0., 0., 1.);
         return;
     } else if(detect_mask) {
-        float3 s_col = tex2D(start_back_sampler, texcoord).rgb;
+        float3 s_col = tex2D(old_start_back_sampler, texcoord).rgb;
         float3 c_col = tex2D(ReShade::BackBuffer, texcoord).rgb;
         float diff;
         switch(algorithm_type) {
@@ -93,29 +99,43 @@ void generate_mask(float4 vpos : SV_Position, float2 texcoord : TexCoord, out fl
             break;
         }
         col_dot = float4(diff, diff, diff, 1.);
-        if(diff < detect_mask_sensitivity) {
+        if(diff > detect_mask_sensitivity) {
             mask = 1.;
         } else {
-            mask = tex2D(generated_mask_sampler, texcoord).r;
+            mask = tex2D(old_generated_mask_sampler, texcoord).r;
         }
+        start_col = tex2D(old_start_back_sampler, texcoord);
+        return;
+    } else {
+        mask = tex2D(old_generated_mask_sampler, texcoord);
+        start_col = tex2D(old_start_back_sampler, texcoord);
+        col_dot = float4(0., 0., 0., 1.);
         return;
     }
 }
 
 void overlays(float4 vpos : SV_Position, float2 texcoord : TexCoord, out float4 col : SV_Target0) {
     col = tex2D(ReShade::BackBuffer, texcoord);
+    if(show_mask) {
+        float t = tex2D(generated_mask_sampler, texcoord).r;
+        col = float4(t, t, t, 1.);
+        return;
+    }
     if(mask_helper) {
         if(tex2D(generated_mask_sampler, texcoord).r == 0.) {
             col = float4(1., 1., 1., 1.);
         }
         return;
     }
-    if(show_mask) {
-        float t = tex2D(generated_mask_sampler, texcoord).r;
-        col = float4(t, t, t, 1.);
-        return;
-    }  
     return;
+}
+
+float4 copy_back(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Target {
+    return tex2D(start_back_sampler, texcoord);
+}
+
+float4 copy_mask(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Target {
+    return tex2D(generated_mask_sampler, texcoord);
 }
 
 technique AutoUIMask {
@@ -130,5 +150,15 @@ technique AutoUIMask {
         VertexShader = PostProcessVS;
         PixelShader = overlays;
         /* RenderTarget = BackBuffer */
+    }
+    pass {
+        VertexShader = PostProcessVS;
+        PixelShader = copy_back;
+        RenderTarget = old_start_back_tex;
+    }
+    pass {
+        VertexShader = PostProcessVS;
+        PixelShader = copy_mask;
+        RenderTarget = old_generated_mask_texture;
     }
 }
