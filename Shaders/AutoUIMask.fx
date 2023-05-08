@@ -117,8 +117,8 @@ void generate_mask(float4 vpos : SV_Position, float2 texcoord : TexCoord, out fl
 void overlays(float4 vpos : SV_Position, float2 texcoord : TexCoord, out float4 col : SV_Target0) {
     col = tex2D(ReShade::BackBuffer, texcoord);
     if(show_mask) {
-        float t = tex2D(generated_mask_sampler, texcoord).r;
-        col = float4(t, t, t, 1.);
+        float t = 1. - tex2D(generated_mask_sampler, texcoord).r;
+        col = float4(t, t, t, t);
         return;
     }
     if(mask_helper) {
