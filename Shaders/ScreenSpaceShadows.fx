@@ -35,7 +35,7 @@
 #define GPU_SOURCE_CALC_STEPS GPU_SOURCE_CALC_STEPS_X * GPU_SOURCE_CALC_STEPS_Y
 
 #ifndef SHADOW_DOWNSAMPLE_LEVEL
-    #define SHADOW_DOWNSAMPLE_LEVEL 3
+    #define SHADOW_DOWNSAMPLE_LEVEL 2
 #endif
 
 #ifndef SEARCH_DELAY
@@ -51,7 +51,7 @@ uniform int shadow_quality
     ui_min  = 8;
     ui_max = 64;
     ui_type = "slider";
-> = 12;
+> = 10;
 
 uniform float depth_offset
 <
@@ -338,6 +338,7 @@ texture search_tex {
     Width = BUFFER_WIDTH / 2 / SHADOW_DOWNSAMPLE_LEVEL / DOWNSAMPLE_BY;
     Height = BUFFER_WIDTH / 2 / SHADOW_DOWNSAMPLE_LEVEL / DOWNSAMPLE_BY;
     Format = R8;
+    SRGBTexture = true;
 };
 
 sampler search_sampler {
