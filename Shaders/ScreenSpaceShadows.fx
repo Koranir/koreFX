@@ -42,6 +42,10 @@
     #define SEARCH_DELAY 0.16
 #endif
 
+#ifndef DEBUG_LIGHTS
+    #define DEBUG_LIGHTS 0
+#endif
+
 #define LUMA_COEFFICIENT float3(0.212656, 0.715158, 0.072186)
 
 uniform int shadow_quality
@@ -760,7 +764,8 @@ float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOOR
 
     for(uint x = 0; x < GPU_SOURCE_CALC_STEPS_X; x++) {
         for(uint y = 0; y < GPU_SOURCE_CALC_STEPS_Y; y++) {
-            float2 light_uv = tex2Dfetch(light_centre_sampler, uint2(x, y)).xy;
+            float4 light = tex2Dfetch(light_centre_sampler, uint2(x, y));
+            float2 light_uv = light.xy;
 #ifndef GEN_HEIGHTMAP
             float light_depth = flip_depth
                 ? (1. - tex2D(ReShade::DepthBuffer, light_uv - float2(0, offset_down)).r)
@@ -792,7 +797,7 @@ float calculate_shadow(float4 position : SV_POSITION, float2 tex_coord : TEXCOOR
                 ) {
                     shadowed += (1. / (shadow_quality * GPU_SOURCE_CALC_STEPS))
                         * ((length(traveled_pos - light_pos) > delete_contact_radius) 
-                        ? 1.
+                        ? light.z
                         : 0.);
                     // shadowed += max(dotp, 0.) / 2.;
                 }
@@ -851,7 +856,7 @@ float4 old_back_buffer_copy(float4 position : SV_POSITION, float2 tex_coord : TE
 }
 
 float4 display_debug(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
-    if(show_lights) {
+    // if(show_lights) {
         for(uint x = 0; x < GPU_SOURCE_CALC_STEPS_X; x++) {
             for(uint y = 0; y < GPU_SOURCE_CALC_STEPS_Y; y++) {
                 float2 light_uv = tex2Dfetch(light_centre_sampler, uint2(x, y)).xy;
@@ -860,7 +865,7 @@ float4 display_debug(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD)
                 }
             }
         }
-    }
+    // }
     return tex2D(ReShade::BackBuffer, tex_coord);
 }
 
@@ -994,8 +999,10 @@ technique SSS
         VertexShader = PostProcessVS;
         PixelShader = show_image;
     }
+#if DEBUG_LIGHTS
     pass ShowCenter {
         VertexShader = PostProcessVS;
         PixelShader = display_debug;
     }
+#endif
 }
