@@ -34,7 +34,9 @@ float4 g_than_avg(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : 
     }
 }
 
-technique Greater_Than_Average {
+technique Greater_Than_Average <
+    ui_tooltip = "ENABLE AvgLuma.fx BEFOR THIS";
+> {
     pass greater_than {
         VertexShader = PostProcessVS;
         PixelShader = g_than_avg;

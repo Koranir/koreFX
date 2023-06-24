@@ -72,7 +72,9 @@ float4 diff_comb PPARGS {
     }
 }
 
-technique Depth_Contrast_Lines {
+technique Depth_Contrast_Lines <
+    ui_tooltip = "ENABLE iMMERSE Launchpad BEFORE THIS";
+> {
     pass {
         VertexShader = PostProcessVS;
         PixelShader = diff_comb;
