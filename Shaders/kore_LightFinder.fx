@@ -1,4 +1,4 @@
-#include "ReShade.fxh"
+#include "kore.fxh"
 
 #ifndef SOURCE_SEARCH_LOD
     #define SOURCE_SEARCH_LOD 4
@@ -49,6 +49,16 @@ uniform float debug_pow_scale
     ui_max = 10.;
 > = 1.;
 
+uniform float frame_blend
+<
+    ui_label = "Frame Continuity";
+    ui_type = "slider";
+    ui_tooltip =    "Frame Blending factor.\n"
+                    "Can cause artifacting, but higher values stabilize.";
+    ui_min = 0.;
+    ui_max = 1.;
+> = 0.1;
+
 texture region_brightest {
     Width = SOURCE_REGIONS_X;
     Height = SOURCE_REGIONS_Y;
@@ -56,6 +66,14 @@ texture region_brightest {
 };
 sampler bright_region_sampler {
     Texture = region_brightest;
+};
+texture prev_region_brightest {
+    Width = SOURCE_REGIONS_X;
+    Height = SOURCE_REGIONS_Y;
+    Format = RGBA8;
+};
+sampler prev_bright_region_sampler {
+    Texture = prev_region_brightest;
 };
 
 float4 get_region_brightest(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
@@ -84,16 +102,28 @@ float4 get_region_brightest(float4 position : SV_POSITION, float2 tex_coord : TE
     }
 
     // 0.7 ~= \frac{1}{\left(3\right)^{\frac{1}{3}}}
-    return float4(float3(brightest.xy, brightest.z * 0.7), 1);
+    brightest.z *= 0.7;
+    brightest.z = pow(brightest.z, 1/debug_pow_scale);
+    float4 prev = tex2D(prev_bright_region_sampler, tex_coord);
+    if(brightest.z > debug_clamp) {
+        if(prev.x || prev.y || prev.z) {
+            return lerp(float4(brightest, 1), prev, frame_blend);
+        } else {
+            return float4(brightest, 1);
+        }
+    }
+    if(prev.z < 0.01) {
+        prev.z = 0;
+    }
+    return lerp(float4(prev.xy, 0, 0), prev, frame_blend);
 }
 
 float4 display_debug(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
     for(uint x = 0; x < SOURCE_REGIONS_X; x++) {
         for(uint y = 0; y < SOURCE_REGIONS_Y; y++) {
             float3 light = tex2Dfetch(bright_region_sampler, uint2(x, y)).xyz;
-            light.z = pow(abs(light.z), 1/debug_pow_scale);
             if(length(light.xy - tex_coord) < 0.01) {
-                if(light.z < debug_clamp) {
+                if(!light.z) {
                     break;
                 }
                 return (float4(light.z, light.z, light.z, 1));
@@ -101,6 +131,10 @@ float4 display_debug(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD)
         }
     }
     return tex2D(ReShade::BackBuffer, tex_coord);
+}
+
+float4 save_old PPARGS {
+    return tex2D(bright_region_sampler, tex_coord);
 }
 
 technique LightFinder
@@ -123,4 +157,9 @@ technique LightFinder
         PixelShader = display_debug;
     }
 #endif
+    pass save {
+        VertexShader = PostProcessVS;
+        PixelShader = save_old;
+        RenderTarget = prev_region_brightest;
+    }
 }
