@@ -716,6 +716,7 @@ void Lighting(i i, out float3 FinalColor : SV_Target0, out float4 Fog : SV_Targe
 	float  F0        = specular*0.08; //reflectance at 0deg angle
 	float  alpha     = roughness * roughness; //roughness used for GGX
 
+	uint lightAmount = 0;
 	for(uint x = 0; x < SOURCE_REGIONS_X; x++) {
         for(uint y = 0; y < SOURCE_REGIONS_Y; y++) {
             float3 light = tex2Dfetch(bright_region_sampler, uint2(x, y)).xyz;
@@ -732,6 +733,7 @@ void Lighting(i i, out float3 FinalColor : SV_Target0, out float4 Fog : SV_Targe
 					light.z * finder_pow_scale,
 					UI_SOFT_S1, UI_S_ENABLE1, UI_FOG1
 				);
+				lightAmount++;
 			}
         }
     }
@@ -746,7 +748,7 @@ __________________________________________*/
 	
 	Fog.a = spr * ShowIcon;
 	Fog.rgb = fog*UI_FOG_COLOR;
-	ShadowOnly /= (SOURCE_REGIONS_X * SOURCE_REGIONS_Y);
+	ShadowOnly /= (SOURCE_REGIONS_X * SOURCE_REGIONS_Y) * lightAmount;
 }
 
 float add4comp(in float4 input){ return input.x+input.y+input.z+input.w;}

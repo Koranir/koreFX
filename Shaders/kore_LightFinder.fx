@@ -16,6 +16,14 @@
     #define DEBUG_LIGHT_POS 0
 #endif
 
+#ifndef LOCAL_LUMA
+    #define LOCAL_LUMA 1
+#endif 
+
+#ifndef LUMA_SIZE
+    #define LUMA_SIZE 256
+#endif 
+
 #define SIM_FOV 70
 
 float3 UVtoPos(float2 tex_coord, float depth)
@@ -59,6 +67,33 @@ uniform float frame_blend
     ui_max = 1.;
 > = 0.1;
 
+#if LOCAL_LUMA
+namespace kore {
+    texture average_luma {
+        Format = R16F;
+    };
+    texture local_luma {
+        Width = LUMA_SIZE;
+        Height = LUMA_SIZE;
+        Format = R16F;
+    };
+    texture contrast_luma {
+        Width = LUMA_SIZE;
+        Height = LUMA_SIZE;
+        Format = R16F;
+    };
+    sampler luma_local {
+    Texture = kore::local_luma;
+    };
+    sampler luma_average {
+        Texture = kore::average_luma;
+    };
+    sampler luma_contrast {
+        Texture = contrast_luma;
+    };
+}
+#endif
+
 texture region_brightest {
     Width = SOURCE_REGIONS_X;
     Height = SOURCE_REGIONS_Y;
@@ -77,6 +112,20 @@ sampler prev_bright_region_sampler {
 };
 
 float4 get_region_brightest(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
+#if LOCAL_LUMA
+    static const float2 REGION_STEPS = float2(
+        float(LUMA_SIZE) / SOURCE_REGIONS_X,
+        float(LUMA_SIZE) / SOURCE_REGIONS_Y
+    );
+    static const float2 OFFSET = float2(
+        1. / LUMA_SIZE,
+        1. / LUMA_SIZE
+    );
+    static const float2 HALF_REGION = float2(
+        1 / SOURCE_REGIONS_X / 2,
+        1 / SOURCE_REGIONS_X / 2
+    );
+#else
     static const int2 REGION_STEPS = int2(
         BUFFER_WIDTH / pow(2, SOURCE_SEARCH_LOD) / SOURCE_REGIONS_X,
         BUFFER_HEIGHT / pow(2, SOURCE_SEARCH_LOD) / SOURCE_REGIONS_Y
@@ -89,12 +138,17 @@ float4 get_region_brightest(float4 position : SV_POSITION, float2 tex_coord : TE
         1 / SOURCE_REGIONS_X / 2,
         1 / SOURCE_REGIONS_X / 2
     );
+#endif
 
     float3 brightest = float3(0, 0, 0);
     for(uint x = 0; x < REGION_STEPS.x; x++) {
         for(uint y = 0; y < REGION_STEPS.y; y++) {
             float2 new_coord = tex_coord + OFFSET * int2(x, y) - HALF_REGION;
-            float l = length(tex2Dlod(ReShade::BackBuffer, float4(new_coord, 0, SOURCE_SEARCH_LOD)).rgb);
+            #if LOCAL_LUMA
+            float l = tex2D(kore::luma_contrast, new_coord).r;
+            #else
+            float l = length(tex2Dlod(ReShade::BackBuffer, float4(new_coord, 0, SOURCE_SEARCH_LOD)).rgb) / 1.73;
+            #endif
             if(l > brightest.z) {
                 brightest = float3(new_coord, l);
             }
@@ -103,7 +157,7 @@ float4 get_region_brightest(float4 position : SV_POSITION, float2 tex_coord : TE
 
     // 0.7 ~= \frac{1}{\left(3\right)^{\frac{1}{3}}}
     brightest.z *= 0.7;
-    brightest.z = pow(brightest.z, 1/debug_pow_scale);
+    brightest.z = pow(brightest.z, debug_pow_scale);
     float4 prev = tex2D(prev_bright_region_sampler, tex_coord);
     if(brightest.z > debug_clamp) {
         if(prev.x || prev.y || prev.z) {
