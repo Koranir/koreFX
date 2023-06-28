@@ -46,3 +46,10 @@ namespace Deferred
         return tex2D(motion_sampler, tex_coord).xy;
     }
 }
+
+static float gaussian5[5] = {1, 4, 6, 4, 1};
+static float gaussian7[7] = {1, 6, 15, 20, 15, 6, 1};
+static float gaussian9[9] = {1, 8, 28, 56, 70, 56, 28, 8, 1};
+static float gaussian11[11] = {1, 10, 45, 120, 210, 235, 210, 130, 45, 10, 1};
+static float gaussian13[13] = {1, 12, 66, 220, 495, 792, 924, 792, 495, 220, 66, 12, 1};
+static float igaussian5[5] = {1, .25, 9, 11, 15};
