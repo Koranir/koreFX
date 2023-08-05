@@ -12,8 +12,8 @@
     #define LOCAL_LUMA 1
 #endif 
 
-#ifndef BLUR_GAUSS
-    #define BLUR_GAUSS 1
+#ifndef CONTRAST_LUMA
+    #define CONTRAST_LUMA 1
 #endif 
 
 namespace kore {
@@ -26,11 +26,13 @@ namespace kore {
         Height = LUMA_SIZE;
         Format = R16F;
     };
+    #if CONTRAST_LUMA
     texture contrast_luma {
         Width = LUMA_SIZE;
         Height = LUMA_SIZE;
         Format = R16F;
     };
+    #endif
     #endif
 }
 texture luma_wide {
@@ -65,7 +67,7 @@ sampler luma_average {
 float gaussian_out <
     ui_label = "Blur Scale";
     ui_type = "drag";
-> = 1;
+> = 0.2;
 #endif
 
 
@@ -103,7 +105,7 @@ float luma_average_ps(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD
 float luma_contrast_ps PPARGS {
     float f = tex2D(wide_luma, tex_coord).r - tex2D(luma_local, tex_coord).r;
     if(f > tex2Dfetch(luma_average, tex_coord).r) {
-        return f;
+        return f * tex2D(luma_local, tex_coord).r;
     } else {
         return 0;
     }
@@ -134,10 +136,12 @@ technique Average_Luma {
         RenderTarget = kore::average_luma;
     }
     #if LOCAL_LUMA
+    #if CONTRAST_LUMA
     pass average {
         VertexShader = PostProcessVS;
         PixelShader = luma_contrast_ps;
         RenderTarget = kore::contrast_luma;
     }
+    #endif
     #endif
 }

@@ -16,25 +16,13 @@
     #define DEBUG_LIGHT_POS 0
 #endif
 
-#ifndef LOCAL_LUMA
-    #define LOCAL_LUMA 1
+#ifndef USE_LOCAL_LUMA
+    #define USE_LOCAL_LUMA 0
 #endif 
 
 #ifndef LUMA_SIZE
     #define LUMA_SIZE 256
 #endif 
-
-#define SIM_FOV 70
-
-float3 UVtoPos(float2 tex_coord, float depth)
-{
-	float3 scrncoord = float3(tex_coord.xy*2-1, depth * RESHADE_DEPTH_LINEARIZATION_FAR_PLANE);
-	scrncoord.xy *= scrncoord.z;
-	scrncoord.x *= BUFFER_WIDTH / BUFFER_HEIGHT;
-	scrncoord *= SIM_FOV * 3.1415926 / 180;
-	
-	return scrncoord;
-}
 
 uniform float debug_clamp
 <
@@ -67,7 +55,7 @@ uniform float frame_blend
     ui_max = 1.;
 > = 0.1;
 
-#if LOCAL_LUMA
+#if USE_LOCAL_LUMA
 namespace kore {
     texture average_luma {
         Format = R16F;
@@ -112,7 +100,7 @@ sampler prev_bright_region_sampler {
 };
 
 float4 get_region_brightest(float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET {
-#if LOCAL_LUMA
+#if USE_LOCAL_LUMA
     static const float2 REGION_STEPS = float2(
         float(LUMA_SIZE) / SOURCE_REGIONS_X,
         float(LUMA_SIZE) / SOURCE_REGIONS_Y
@@ -144,7 +132,7 @@ float4 get_region_brightest(float4 position : SV_POSITION, float2 tex_coord : TE
     for(uint x = 0; x < REGION_STEPS.x; x++) {
         for(uint y = 0; y < REGION_STEPS.y; y++) {
             float2 new_coord = tex_coord + OFFSET * int2(x, y) - HALF_REGION;
-            #if LOCAL_LUMA
+            #if USE_LOCAL_LUMA
             float l = tex2D(kore::luma_contrast, new_coord).r;
             #else
             float l = length(tex2Dlod(ReShade::BackBuffer, float4(new_coord, 0, SOURCE_SEARCH_LOD)).rgb) / 1.73;
@@ -155,7 +143,6 @@ float4 get_region_brightest(float4 position : SV_POSITION, float2 tex_coord : TE
         }
     }
 
-    // 0.7 ~= \frac{1}{\left(3\right)^{\frac{1}{3}}}
     brightest.z *= 0.7;
     brightest.z = pow(brightest.z, debug_pow_scale);
     float4 prev = tex2D(prev_bright_region_sampler, tex_coord);

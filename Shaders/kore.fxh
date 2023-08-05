@@ -1,10 +1,51 @@
+#ifndef BUFFER_HEIGHT
+    #define BUFFER_HEIGHT 1
+    #define BUFFER_WIDTH 1
+    #define BUFFER_RCP_HEIGHT 1
+    #define BUFFER_RCP_WIDTH 1
+#endif
+
 #include "ReShade.fxh"
 
 #define PPARGS (float4 position : SV_POSITION, float2 tex_coord : TEXCOORD) : SV_TARGET
 
+#define fov 60
+
+#define rad 0.0174533
+#define deg 57.2958
+
+// Legacy
 float linearize(float depth) {
     return depth / (RESHADE_DEPTH_LINEARIZATION_FAR_PLANE - (depth * RESHADE_DEPTH_LINEARIZATION_FAR_PLANE - 1));
 }
+
+float3 uv_pos(float2 texcoord)
+{
+	float3 scrncoord = float3(texcoord.xy * 2 - 1, ReShade::GetLinearizedDepth(texcoord) * RESHADE_DEPTH_LINEARIZATION_FAR_PLANE);
+	scrncoord.xy *= scrncoord.z * (rad*fov*0.5);
+	scrncoord.x *= BUFFER_ASPECT_RATIO;
+	
+	return scrncoord.xyz;
+}
+
+float3 uv_pos(float2 texcoord, float depth)
+{
+	float3 scrncoord = float3(texcoord.xy * 2 - 1, depth * RESHADE_DEPTH_LINEARIZATION_FAR_PLANE);
+	scrncoord.xy *= scrncoord.z * (rad * fov * 0.5);
+	scrncoord.x *= BUFFER_ASPECT_RATIO;
+	
+	return scrncoord.xyz;
+}
+
+float2 pos_uv(float3 position)
+{
+	float2 screen_pos = position.xy;
+	screen_pos.x /= BUFFER_ASPECT_RATIO;
+	screen_pos /= position.z * rad * fov / 2;
+	
+	return screen_pos / 2 + 0.5;
+}
+
 
 // iMMERSE Launchpad Things
 namespace Deferred 
@@ -39,7 +80,11 @@ namespace Deferred
     }
 
     float get_depth(float2 tex_coord) {
-        return tex2D(normal_sampler, tex_coord).z;
+        return tex2D(motion_sampler, tex_coord).z;
+    }
+
+    float get_depth_lod(float2 tex_coord, float lod) {
+        return tex2Dlod(motion_sampler, float4(tex_coord, 0, lod)).w;
     }
 
     float2 get_motion(float2 tex_coord) {
